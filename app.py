@@ -329,7 +329,7 @@ with gr.Blocks(title="Employee Renege Risk Predictor", css=css) as demo:
     gr.HTML("""
     <div class="big-title">
         <h1>👔 Employee Renege Risk Predictor</h1>
-        <p>Predict whether a candidate is likely to <strong style="color:#f1f5f9">renege</strong> after accepting an offer · Powered by Logistic Regression · Threshold: 0.35</p>
+        <p>Predict whether a candidate is likely to <strong style="color:#f1f5f9">renege</strong> after accepting an offer · Powered by Random Forest Classifier · Threshold: 0.35</p>
     </div>
     """)
 
