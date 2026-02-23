@@ -2,13 +2,10 @@ import gradio as gr
 import pandas as pd
 import pickle
 import statsmodels.api as sm
+import os
 
 # ─────────────────────────────────────────────────────────────
 # 1. LOAD YOUR MODEL
-#    Save in notebook first:
-#       import pickle
-#       with open("logit_model.pkl", "wb") as f:
-#           pickle.dump(logit_model, f)
 # ─────────────────────────────────────────────────────────────
 with open("final_logit.pkl", "rb") as f:
     model = pickle.load(f)
@@ -16,16 +13,14 @@ with open("final_logit.pkl", "rb") as f:
 
 # ─────────────────────────────────────────────────────────────
 # 2. DROPDOWN OPTIONS
-#    Add all possible values your data has for each column
 # ─────────────────────────────────────────────────────────────
-CHECKING_ACC_OPTIONS  = ["A11", "A12", "A13", "A14"]   # A13 → one-hot 1, else 0
-CREDIT_HISTORY_OPTIONS = ["A30", "A31", "A32", "A33", "A34"]  # A34 → one-hot 1, else 0
-SAVINGS_ACC_OPTIONS   = ["A61", "A62", "A63", "A64", "A65"]   # A65 → one-hot 1, else 0
+CHECKING_ACC_OPTIONS   = ["A11", "A12", "A13", "A14"]
+CREDIT_HISTORY_OPTIONS = ["A30", "A31", "A32", "A33", "A34"]
+SAVINGS_ACC_OPTIONS    = ["A61", "A62", "A63", "A64", "A65"]
 
 
 # ─────────────────────────────────────────────────────────────
 # 3. PREDICTION FUNCTION
-#    UI collects all fields; model only receives what it needs
 # ─────────────────────────────────────────────────────────────
 def predict(
     checking_acc,
@@ -36,9 +31,6 @@ def predict(
     credit_history,
     savings_acc,
 ):
-    # One-hot encode exactly as model expects
-
-    
     features = {
         "duration":            duration,
         "amount":              amount,
@@ -50,7 +42,6 @@ def predict(
         "savings_acc_A65":     1 if savings_acc == "A65" else 0,
     }
 
-    # Exact column order the model was trained on
     col_order = [
         "duration", "amount", "inst_rate", "age",
         "checkin_acc_A13", "checkin_acc_A14",
@@ -58,7 +49,7 @@ def predict(
     ]
 
     X = pd.DataFrame([features])[col_order].astype(float)
-    X = sm.add_constant(X, has_constant="add")  # statsmodels needs constant
+    X = sm.add_constant(X, has_constant="add")
 
     prob = model.predict(X)[0]
     label = "✅  Yes — Good Credit" if prob >= 0.5 else "❌  No — Bad Credit"
@@ -69,8 +60,9 @@ def predict(
 
 # ─────────────────────────────────────────────────────────────
 # 4. GRADIO UI
+#    FIX 1: Removed theme from gr.Blocks() — moved to launch()
 # ─────────────────────────────────────────────────────────────
-with gr.Blocks(theme=gr.themes.Soft(), title="Credit Risk Predictor") as demo:
+with gr.Blocks(title="Credit Risk Predictor") as demo:
 
     gr.Markdown("## 🏦 Credit Risk Predictor\nFill in the applicant details and click **Predict**.")
 
@@ -109,8 +101,8 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Credit Risk Predictor") as demo:
     gr.Markdown("---")
     gr.Markdown("### 📊 Result")
     with gr.Row():
-        output_label = gr.Textbox(label="Prediction",   interactive=False, scale=2)
-        output_conf  = gr.Textbox(label="Probability",  interactive=False, scale=1)
+        output_label = gr.Textbox(label="Prediction",  interactive=False, scale=2)
+        output_conf  = gr.Textbox(label="Probability", interactive=False, scale=1)
 
     predict_btn.click(
         fn=predict,
@@ -127,5 +119,15 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Credit Risk Predictor") as demo:
         "`credit_history_A34`, and `savings_acc_A65` are passed to the model."
     )
 
+# ─────────────────────────────────────────────────────────────
+# 5. LAUNCH
+#    FIX 2: server_name="0.0.0.0" — required for Railway/Docker
+#    FIX 3: PORT from environment variable — required for Railway
+#    FIX 4: theme moved here from gr.Blocks()
+# ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=int(os.environ.get("PORT", 7860)),
+        theme=gr.themes.Soft()
+    )
