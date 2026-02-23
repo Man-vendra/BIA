@@ -2,3 +2,4 @@ gradio
 statsmodels
 pandas
 numpy
+requests
