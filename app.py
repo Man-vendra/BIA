@@ -3,12 +3,44 @@ import pandas as pd
 import pickle
 import statsmodels.api as sm
 import os
+import requests
 
 # ─────────────────────────────────────────────────────────────
-# 1. LOAD MODEL
+# 1. DOWNLOAD MODEL FROM GOOGLE DRIVE AT STARTUP
 # ─────────────────────────────────────────────────────────────
-with open("renege_model.pkl", "rb") as f:
+MODEL_PATH = "renege_model.pkl"
+FILE_ID    = "1fK8B0gQ96ZKB-2G0ucCeWV6zMPCPWmbY"
+
+def download_model_from_drive(file_id, dest_path):
+    print("Downloading model from Google Drive...")
+    URL = "https://drive.google.com/uc?export=download"
+    session = requests.Session()
+
+    response = session.get(URL, params={"id": file_id}, stream=True)
+
+    # Handle large file virus-scan warning page
+    token = None
+    for key, value in response.cookies.items():
+        if key.startswith("download_warning"):
+            token = value
+            break
+
+    if token:
+        response = session.get(URL, params={"id": file_id, "confirm": token}, stream=True)
+
+    with open(dest_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=32768):
+            if chunk:
+                f.write(chunk)
+    print("Model downloaded successfully!")
+
+if not os.path.exists(MODEL_PATH):
+    download_model_from_drive(FILE_ID, MODEL_PATH)
+
+with open(MODEL_PATH, "rb") as f:
     model = pickle.load(f)
+
+print("Model loaded successfully!")
 
 # ─────────────────────────────────────────────────────────────
 # 2. DROPDOWN OPTIONS
@@ -22,7 +54,7 @@ LOCATION_OPTIONS = ["Bangalore", "Chennai", "Cochin", "Gurgaon", "Hyderabad",
 
 # ─────────────────────────────────────────────────────────────
 # 3. PREDICTION FUNCTION
-#    Derived feature thresholds (from notebook cell 5):
+#    Thresholds from notebook cell 5:
 #      short_acceptance        = Duration.to.accept.offer <= 3
 #      long_acceptance         = Duration.to.accept.offer >= 30
 #      long_notice             = Notice.period >= 60
@@ -31,13 +63,14 @@ LOCATION_OPTIONS = ["Bangalore", "Chennai", "Cochin", "Gurgaon", "Hyderabad",
 #      exp_lt_3                = Rex.in.Yrs < 3
 #      exp_gt_10               = Rex.in.Yrs > 10
 #      hike_mismatch_long_notice = hike_mismatch AND long_notice
+#    Cost-based threshold = 0.35 (FN cost=5, FP cost=1)
 # ─────────────────────────────────────────────────────────────
 def predict(
     duration, notice_period, hike_offered, pct_diff_ctc,
     experience, age, relocate, joining_bonus,
     offered_band, gender, candidate_source, lob, joining_location
 ):
-    # --- Derived features (exact thresholds from notebook) ---
+    # --- Derived features ---
     short_acceptance          = 1 if duration <= 3 else 0
     long_acceptance           = 1 if duration >= 30 else 0
     long_notice               = 1 if notice_period >= 60 else 0
@@ -47,7 +80,6 @@ def predict(
     exp_gt_10                 = 1 if experience > 10 else 0
     hike_mismatch_long_notice = 1 if (hike_mismatch == 1 and long_notice == 1) else 0
 
-    # --- Build feature dict ---
     features = {
         # Numeric
         "Duration.to.accept.offer":    duration,
@@ -106,7 +138,6 @@ def predict(
         "Joining Location_Pune":      1 if joining_location == "Pune" else 0,
     }
 
-    # Exact column order matching significant_vars from training
     col_order = [
         'Duration.to.accept.offer', 'Notice.period',
         'Percent.hike.offered.in.CTC', 'Percent.difference.CTC', 'relocate',
@@ -127,16 +158,12 @@ def predict(
     X = pd.DataFrame([features])[col_order].astype(float)
     X = sm.add_constant(X, has_constant="add")
 
-    prob = model.predict(X)[0]  # probability of reneging
+    prob = model.predict(X)[0]
 
-    # Cost-based threshold = 0.35 (FN cost=5, FP cost=1)
-    # Lower bar intentionally to catch more at-risk candidates
-    if prob >= 0.35:
-        label = "🔴  High Risk — Likely to Renege"
-    else:
-        label = "🟢  Low Risk — Likely to Join"
+    # Cost-based threshold = 0.35 (recommended for ScaleneWorks)
+    label = "🔴  High Risk — Likely to Renege" if prob >= 0.35 else "🟢  Low Risk — Likely to Join"
 
-    # Risk flags for transparency
+    # Risk flags
     flags = []
     if short_acceptance:          flags.append("⚡ Accepted very quickly (≤ 3 days)")
     if long_acceptance:           flags.append("🐢 Took long to accept (≥ 30 days)")
@@ -162,12 +189,12 @@ with gr.Blocks(title="Employee Renege Risk Predictor") as demo:
 
         with gr.Column():
             gr.Markdown("### 📋 Offer Details")
-            duration     = gr.Number(label="Duration to Accept Offer (days)", value=7, minimum=1, maximum=90, step=1,
-                                     info="How many days the candidate took to accept")
-            hike_offered = gr.Number(label="Hike Offered in CTC (%)", value=20, minimum=0, maximum=200, step=1,
-                                     info="% hike offered over current CTC")
-            pct_diff_ctc = gr.Number(label="Percent Difference in CTC (%)", value=0, minimum=-100, maximum=100, step=1,
-                                     info="Offered vs Expected CTC. Negative = below expectation")
+            duration      = gr.Number(label="Duration to Accept Offer (days)", value=7, minimum=1, maximum=90, step=1,
+                                      info="How many days the candidate took to accept")
+            hike_offered  = gr.Number(label="Hike Offered in CTC (%)", value=20, minimum=0, maximum=200, step=1,
+                                      info="% hike offered over current CTC")
+            pct_diff_ctc  = gr.Number(label="Percent Difference in CTC (%)", value=0, minimum=-100, maximum=100, step=1,
+                                      info="Offered vs Expected CTC. Negative = below expectation")
             offered_band  = gr.Dropdown(label="Offered Band", choices=BAND_OPTIONS, value="E2")
             joining_bonus = gr.Radio(label="Joining Bonus Offered?", choices=["Yes", "No"], value="No")
 
@@ -190,8 +217,8 @@ with gr.Blocks(title="Employee Renege Risk Predictor") as demo:
     gr.Markdown("---")
     gr.Markdown("### 📊 Prediction Result")
     with gr.Row():
-        output_label = gr.Textbox(label="Risk Assessment",      interactive=False, scale=2)
-        output_prob  = gr.Textbox(label="Renege Probability",   interactive=False, scale=1)
+        output_label = gr.Textbox(label="Risk Assessment",    interactive=False, scale=2)
+        output_prob  = gr.Textbox(label="Renege Probability", interactive=False, scale=1)
     output_flags = gr.Textbox(label="🚩 Risk Flags Detected", interactive=False, lines=5)
 
     predict_btn.click(
@@ -205,10 +232,9 @@ with gr.Blocks(title="Employee Renege Risk Predictor") as demo:
     )
 
     gr.Markdown("""
-    > **Risk flags are auto-computed from your inputs:**
-    > Short acceptance ≤ 3 days &nbsp;|&nbsp; Long acceptance ≥ 30 days &nbsp;|&nbsp; Long notice ≥ 60 days
-    > Hike mismatch: CTC diff < −10% &nbsp;|&nbsp; High offer hike ≥ 100%
-    > Low exp < 3 yrs &nbsp;|&nbsp; High exp > 10 yrs
+    > **Threshold:** 0.35 (cost-based) — FN cost = 5, FP cost = 1
+    > **Risk flags auto-computed:** Short acceptance ≤ 3 days | Long acceptance ≥ 30 days | Long notice ≥ 60 days
+    > Hike mismatch < −10% | High offer hike ≥ 100% | Low exp < 3 yrs | High exp > 10 yrs
     """)
 
 # ─────────────────────────────────────────────────────────────
