@@ -1,5 +1,6 @@
 gradio
-statsmodels
 pandas
-numpy
+statsmodels
+scikit-learn
 requests
+numpy
