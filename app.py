@@ -403,8 +403,4 @@ with gr.Blocks(title="Employee Renege Risk Predictor", css=css) as demo:
 # 6. LAUNCH
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    demo.launch(
-        server_name="0.0.0.0",
-        server_port=int(os.environ.get("PORT", 7860)),
-        theme=gr.themes.Base()
-    )
+    app.launch()
